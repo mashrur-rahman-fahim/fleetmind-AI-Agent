@@ -1,0 +1,21 @@
+# FleetMind AI Agent - Track 2 Dependencies
+# MCP in Action - Enterprise Category
+
+# Gradio for UI
+gradio>=4.0.0
+
+# HTTP client for MCP SSE connection
+httpx>=0.25.0
+httpx-sse>=0.4.0
+
+# Google Gemini AI for agent reasoning
+google-generativeai>=0.3.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Async support
+anyio>=4.0.0
+
+# JSON handling
+orjson>=3.9.0
