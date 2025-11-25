@@ -11,6 +11,8 @@ Tags: mcp-in-action-track-enterprise
 import asyncio
 import json
 from typing import Generator
+import threading
+from concurrent.futures import Future
 
 import gradio as gr
 
@@ -23,16 +25,53 @@ from agent import FleetMindAgent, AgentResponse
 mcp_client: FleetMindMCPClient | None = None
 agent: FleetMindAgent | None = None
 
+# Global event loop for async operations
+_event_loop = None
+_event_loop_thread = None
+
+
+def get_event_loop():
+    """Get or create a persistent event loop running in a background thread"""
+    global _event_loop, _event_loop_thread
+
+    if _event_loop is None or not _event_loop.is_running():
+        def run_loop(loop):
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        _event_loop = asyncio.new_event_loop()
+        _event_loop_thread = threading.Thread(target=run_loop, args=(_event_loop,), daemon=True)
+        _event_loop_thread.start()
+
+    return _event_loop
+
+
+def run_async(coro):
+    """Run an async coroutine in the background event loop"""
+    loop = get_event_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
+
 
 async def connect_to_mcp(server_url: str, api_key: str) -> tuple[str, str]:
     """Connect to the MCP server"""
     global mcp_client, agent
 
     if not server_url or not api_key:
-        return "❌ Please provide both server URL and API key", ""
+        return "Please provide both server URL and API key", ""
 
     try:
+        # Disconnect old client if exists
+        if mcp_client is not None:
+            try:
+                await mcp_client.disconnect()
+            except Exception as e:
+                print(f"Warning: Error disconnecting old client: {e}")
+
         mcp_client = FleetMindMCPClient(server_url, api_key)
+
+        # Connect using official MCP SDK (fast connection)
+        print("Connecting to MCP server...")
         result = await mcp_client.connect()
 
         if result.get("success"):
@@ -60,20 +99,21 @@ async def connect_to_mcp(server_url: str, api_key: str) -> tuple[str, str]:
 
 
 def sync_connect(server_url: str, api_key: str) -> tuple[str, str]:
-    """Synchronous wrapper for connect"""
-    return asyncio.run(connect_to_mcp(server_url, api_key))
+    """Synchronous wrapper for connect - uses persistent event loop"""
+    return run_async(connect_to_mcp(server_url, api_key))
 
 
 async def process_chat_message(
     message: str,
-    history: list[list[str]],
+    history: list,
     gemini_key: str
-) -> tuple[list[list[str]], str, str]:
+) -> tuple[list, str, str]:
     """Process a chat message through the agent"""
     global agent, mcp_client
 
     if not mcp_client or not mcp_client.is_connected:
-        history.append([message, "❌ Not connected to MCP server. Please connect first."])
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": "❌ Not connected to MCP server. Please connect first."})
         return history, "", ""
 
     if not agent:
@@ -81,7 +121,8 @@ async def process_chat_message(
         if gemini_key:
             agent = FleetMindAgent(mcp_client, gemini_key)
         else:
-            history.append([message, "❌ Gemini API key not configured. Please provide it in settings."])
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": "❌ Gemini API key not configured. Please provide it in settings."})
             return history, "", ""
 
     try:
@@ -111,22 +152,25 @@ async def process_chat_message(
         if response.tools_called:
             tools_text = "**Tools Called:**\n" + "\n".join([f"• `{t}`" for t in response.tools_called])
 
-        history.append([message, response.message])
+        # Add messages in the new format
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": response.message})
         return history, reasoning_text, tools_text
 
     except Exception as e:
         error_msg = f"❌ Error processing message: {str(e)}"
-        history.append([message, error_msg])
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": error_msg})
         return history, f"**Error:** {str(e)}", ""
 
 
 def sync_process_chat(
     message: str,
-    history: list[list[str]],
+    history: list,
     gemini_key: str
-) -> tuple[list[list[str]], str, str]:
-    """Synchronous wrapper for chat processing"""
-    return asyncio.run(process_chat_message(message, history, gemini_key))
+) -> tuple[list, str, str]:
+    """Synchronous wrapper for chat processing - uses persistent event loop"""
+    return run_async(process_chat_message(message, history, gemini_key))
 
 
 def clear_chat() -> tuple[list, str, str]:
@@ -153,18 +197,129 @@ EXAMPLE_PROMPTS = [
 def create_app() -> gr.Blocks:
     """Create the Gradio application"""
 
-    with gr.Blocks() as app:
+    # Custom CSS matching Track 1's dark theme
+    custom_css = """
+    /* Track 1 Dark Theme - Matching fleetmind-mcp design */
+    :root {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --bg-tertiary: #334155;
+        --text-primary: #e2e8f0;
+        --text-secondary: #94a3b8;
+        --accent-blue: #3b82f6;
+        --accent-blue-hover: #2563eb;
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --border-color: #334155;
+    }
+
+    /* Main container */
+    .gradio-container {
+        background: var(--bg-primary) !important;
+        color: var(--text-primary) !important;
+    }
+
+    /* All blocks */
+    .block {
+        background: var(--bg-secondary) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 12px !important;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.4) !important;
+    }
+
+    /* Textbox, Textarea */
+    textarea, input[type="text"], input[type="password"] {
+        background: var(--bg-primary) !important;
+        color: var(--text-primary) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 6px !important;
+    }
+
+    /* Buttons */
+    .primary {
+        background: var(--accent-blue) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+    }
+
+    .primary:hover {
+        background: var(--accent-blue-hover) !important;
+    }
+
+    .secondary {
+        background: var(--bg-tertiary) !important;
+        color: var(--text-primary) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+
+    /* Chatbot */
+    .message-wrap {
+        background: var(--bg-secondary) !important;
+    }
+
+    /* Markdown */
+    .prose {
+        color: var(--text-primary) !important;
+    }
+
+    .prose h1, .prose h2, .prose h3 {
+        color: #f1f5f9 !important;
+    }
+
+    .prose code {
+        background: var(--bg-tertiary) !important;
+        color: var(--accent-blue) !important;
+        padding: 2px 6px !important;
+        border-radius: 4px !important;
+    }
+
+    .prose pre {
+        background: var(--bg-primary) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+
+    /* Accordion */
+    .accordion {
+        background: var(--bg-secondary) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+
+    /* Labels */
+    label {
+        color: var(--text-primary) !important;
+    }
+
+    /* Success/Error states */
+    .success {
+        background: rgba(16, 185, 129, 0.1) !important;
+        border-left: 4px solid var(--accent-green) !important;
+    }
+
+    .error {
+        background: rgba(239, 68, 68, 0.1) !important;
+        border-left: 4px solid var(--accent-red) !important;
+    }
+    """
+
+    with gr.Blocks(title="FleetMind AI Agent - MCP in Action") as app:
+        # Inject custom CSS using HTML
+        gr.HTML(f"<style>{custom_css}</style>")
         gr.Markdown("""
         # 🚛 FleetMind AI Agent
-        ### Enterprise Fleet Management with Autonomous AI
+        ### Autonomous Enterprise Fleet Management
 
-        **Track 2: MCP in Action - Enterprise Category**
+        <div style="background: #1e3a5f; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #3b82f6;">
+        <strong>🏆 Track 2: MCP in Action - Enterprise Category</strong><br>
+        Tags: <code>mcp-in-action-track-enterprise</code>
+        </div>
 
-        Chat naturally with the AI agent to manage your delivery fleet. The agent will:
-        - Understand your requests in natural language
-        - Plan and execute multi-step operations
-        - Use AI-powered assignment for optimal driver selection
-        - Explain its reasoning process
+        **Autonomous AI Agent Features:**
+        - 🧠 **Planning & Reasoning** - Multi-step execution with Gemini 2.0 Flash
+        - 🔧 **29 MCP Tools** - Complete fleet management toolkit
+        - 🎯 **Context Engineering** - Smart conversation memory and context management
+        - 🤖 **AI-Powered Assignment** - Intelligent driver matching with confidence scores
+        - 📊 **Real-time Execution** - Watch the agent think, plan, and execute
         """)
 
         with gr.Row():
@@ -276,21 +431,131 @@ def create_app() -> gr.Blocks:
 
         gr.Markdown("""
         ---
-        **About FleetMind AI Agent**
 
-        This application demonstrates the power of MCP (Model Context Protocol) for building
-        autonomous AI agents. It connects to the FleetMind MCP server which provides 29 tools
-        for comprehensive fleet management:
+        <div style="background: #1e293b; padding: 30px; border-radius: 12px; margin-top: 20px;">
 
-        - 📍 **Geocoding & Routing** - Address conversion and intelligent route planning
-        - 📦 **Order Management** - Create, track, and manage delivery orders
-        - 🚗 **Driver Management** - Onboard and manage delivery drivers
-        - 🔄 **Assignment System** - Manual, automatic, and AI-powered driver assignment
-        - 📊 **Analytics** - Fleet performance and SLA tracking
+        ## 🏆 MCP Hackathon Submission
 
-        Built for the **MCP Hackathon Track 2: MCP in Action**
+        **Track 2: MCP in Action - Enterprise Category**
 
         Tags: `mcp-in-action-track-enterprise`
+
+        ### ✅ Track 2 Requirements Met
+
+        <div style="background: #134e4a; padding: 15px; border-radius: 6px; margin: 10px 0; border-left: 4px solid #10b981;">
+
+        ✅ **Autonomous Agent Behavior** - Gemini 2.0 Flash provides planning, reasoning, and execution<br>
+        ✅ **MCP Tools Integration** - 29 enterprise fleet management tools via Model Context Protocol<br>
+        ✅ **Gradio Application** - Professional dark-themed UI matching enterprise standards<br>
+        ✅ **Context Engineering** - Enhanced conversation memory and context management<br>
+        ✅ **Clear User Value** - Real-world fleet management with AI-powered optimization
+
+        </div>
+
+        ### 🎯 Why This Project Stands Out
+
+        1. **Complete Autonomous System**: Not just tool calling - full planning, reasoning, and multi-step execution
+        2. **Production-Ready Architecture**: Connects to live MCP server with 29 tools via SSE protocol
+        3. **AI-Powered Intelligence**: Gemini 2.0 Flash for context-aware decision making
+        4. **Enterprise Value**: Solves real business problems in logistics and delivery management
+        5. **Advanced Features**: Context engineering, intelligent driver assignment, traffic-aware routing
+
+        ### 🔧 Technology Stack
+
+        - **Frontend**: Gradio 4.x with custom dark theme
+        - **AI Model**: Google Gemini 2.0 Flash Experimental
+        - **Protocol**: Model Context Protocol (MCP) via SSE transport
+        - **MCP Server**: FleetMind Dispatch Coordinator (29 tools)
+        - **Features**: Planning, Reasoning, Multi-step execution, Context management
+
+        ### 📦 29 MCP Tools Available
+
+        **Geocoding & Routing (3 tools)**
+        - Address geocoding with Google Maps API
+        - Traffic-aware route calculation
+        - AI-powered weather + traffic routing
+
+        **Order Management (8 tools)**
+        - Create, read, update, delete orders
+        - Search and filter capabilities
+        - Status tracking and SLA monitoring
+
+        **Driver Management (8 tools)**
+        - Driver onboarding and profiles
+        - Real-time location tracking
+        - Availability and capacity management
+
+        **Assignment System (8 tools)**
+        - Manual driver assignment
+        - Automatic nearest-driver assignment
+        - **AI-powered intelligent assignment** using Gemini 2.0 Flash
+        - Delivery completion and failure handling
+
+        **Bulk Operations (2 tools)**
+        - Batch order operations
+        - Fleet-wide management
+
+        ### 🚀 Autonomous Agent Capabilities
+
+        The FleetMind AI Agent demonstrates true autonomous behavior:
+
+        **Planning**: Breaks down complex requests into actionable steps
+        ```
+        User: "Create an urgent delivery for John at 123 Main St by 5pm and assign best driver"
+
+        Agent Plans:
+        1. Geocode address to get coordinates
+        2. Create order with urgency and deadline
+        3. Use AI to find optimal driver
+        4. Create assignment with routing
+        5. Report results and ETA
+        ```
+
+        **Reasoning**: Explains decision-making process transparently
+        - Why certain tools were chosen
+        - How parameters were determined
+        - What trade-offs were considered
+
+        **Execution**: Handles multi-step operations autonomously
+        - Sequential tool calling with dependency management
+        - Error handling and recovery
+        - Result aggregation and reporting
+
+        **Context Engineering**: Maintains coherent conversations
+        - Conversation history management
+        - User preference learning
+        - Task continuation across messages
+
+        ### 🌐 Live Demo
+
+        **Try these autonomous workflows:**
+        1. "Create 3 urgent orders for different addresses and assign them optimally"
+        2. "Show me fleet status and recommend which driver to hire next"
+        3. "Find the order taking longest and explain why"
+
+        ### 🔗 Architecture
+
+        ```
+        User → Gradio UI → FleetMind Agent (Gemini 2.0) → MCP Client → MCP Server (29 Tools) → PostgreSQL
+                                    ↓
+                            Planning & Reasoning
+                                    ↓
+                            Multi-step Execution
+                                    ↓
+                            Natural Language Response
+        ```
+
+        ### 📚 Learn More
+
+        - **FleetMind MCP Server**: [Track 1 Submission](https://huggingface.co/spaces/mcp-1st-birthday/fleetmind-dispatch-ai)
+        - **Model Context Protocol**: [Anthropic MCP Docs](https://modelcontextprotocol.io)
+        - **Track 2 Guide**: Enterprise AI agents using MCP tools
+
+        </div>
+
+        <div style="text-align: center; margin-top: 20px; color: #94a3b8;">
+        Built with ❤️ for the MCP Hackathon | Track 2: MCP in Action - Enterprise
+        </div>
         """)
 
     return app

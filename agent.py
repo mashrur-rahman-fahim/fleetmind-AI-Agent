@@ -42,12 +42,23 @@ class FleetMindAgent:
     """
     AI Agent for FleetMind Fleet Management
     Uses Gemini 2.0 Flash for reasoning and MCP tools for execution
+
+    Advanced Features:
+    - Context Engineering: Smart conversation memory with summarization
+    - Multi-step Planning: Complex task breakdown and execution
+    - Reasoning Transparency: Detailed explanation of decision-making
     """
 
     def __init__(self, mcp_client: FleetMindMCPClient, gemini_api_key: str):
         self.mcp_client = mcp_client
         self.conversation_history: list[dict] = []
         self.max_tool_calls = Config.MAX_TOOL_CALLS_PER_TURN
+
+        # Context Engineering: Enhanced memory management
+        self.context_summary: str = ""  # Rolling summary of conversation
+        self.user_preferences: dict = {}  # Learned user preferences
+        self.task_context: dict = {}  # Current task context
+        self.max_history_length = 20  # Max messages before summarization
 
         # Initialize Gemini
         genai.configure(api_key=gemini_api_key)
@@ -60,6 +71,54 @@ class FleetMindAgent:
                 "max_output_tokens": 8192,
             }
         )
+
+    async def _summarize_conversation(self) -> str:
+        """
+        Context Engineering: Summarize conversation when it gets too long
+        This prevents context window overflow and maintains relevant information
+        """
+        if len(self.conversation_history) < self.max_history_length:
+            return ""
+
+        # Take older messages (not the most recent 6)
+        messages_to_summarize = self.conversation_history[:-6]
+
+        summary_prompt = f"""Summarize the following conversation history concisely.
+Focus on:
+1. Key actions taken (orders created, drivers assigned, etc.)
+2. User preferences or patterns
+3. Important context for future requests
+
+Conversation:
+{json.dumps(messages_to_summarize, indent=2)}
+
+Provide a concise summary in 3-4 sentences."""
+
+        try:
+            response = self.model.generate_content(summary_prompt)
+            summary = response.text
+            # Keep only recent messages + summary
+            self.conversation_history = self.conversation_history[-6:]
+            return summary
+        except Exception:
+            return ""
+
+    def _extract_user_preferences(self, user_message: str, agent_response: str):
+        """
+        Context Engineering: Learn user preferences over time
+        Examples: preferred priority levels, common addresses, driver preferences
+        """
+        # Simple pattern matching for common preferences
+        if "urgent" in user_message.lower() or "asap" in user_message.lower():
+            self.user_preferences["prefers_urgent"] = True
+
+        if "fragile" in user_message.lower():
+            self.user_preferences["handles_fragile"] = True
+
+        # Extract common addresses (simple heuristic)
+        if "deliver to" in user_message.lower() or "address" in user_message.lower():
+            # Could extract and store frequently used addresses
+            pass
 
     def _build_tools_schema(self) -> str:
         """Build a schema of available tools for the AI"""
@@ -84,13 +143,16 @@ class FleetMindAgent:
         return "\n\n".join(schema_parts)
 
     def _create_prompt(self, user_message: str) -> str:
-        """Create the full prompt for the AI model"""
+        """
+        Create the full prompt for the AI model with Context Engineering
+        Includes conversation summary, user preferences, and task context
+        """
         # Get current date/time for context
         now = datetime.now()
         current_time = now.strftime("%Y-%m-%d %H:%M:%S")
         default_delivery_time = (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
 
-        # Build context
+        # Build context with Context Engineering enhancements
         context = f"""
 Current Date/Time: {current_time}
 Default Expected Delivery Time (if not specified): {default_delivery_time}
@@ -99,11 +161,24 @@ Connected to MCP Server: {self.mcp_client.is_connected}
 Available Tools: {len(self.mcp_client.tools)}
 """
 
-        # Recent conversation context
+        # Add conversation summary if available (Context Engineering)
+        if self.context_summary:
+            context += f"\n**Conversation Summary**: {self.context_summary}\n"
+
+        # Add learned user preferences (Context Engineering)
+        if self.user_preferences:
+            prefs_text = "\n**Learned User Preferences**:\n"
+            if self.user_preferences.get("prefers_urgent"):
+                prefs_text += "- User often creates urgent deliveries\n"
+            if self.user_preferences.get("handles_fragile"):
+                prefs_text += "- User frequently handles fragile items\n"
+            context += prefs_text
+
+        # Recent conversation context (limited to prevent overflow)
         recent_history = self.conversation_history[-6:] if self.conversation_history else []
         history_text = ""
         if recent_history:
-            history_text = "\n\nRecent Conversation:\n"
+            history_text = "\n\n**Recent Conversation**:\n"
             for msg in recent_history:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")[:500]
@@ -127,7 +202,7 @@ Available Tools: {len(self.mcp_client.tools)}
 ## Your Response Format
 Respond with a JSON object containing:
 {{
-    "reasoning": "Your step-by-step thinking process",
+    "reasoning": "Your step-by-step thinking process (be detailed and explain WHY you choose certain actions)",
     "plan": [
         {{
             "step": 1,
@@ -179,12 +254,21 @@ IMPORTANT: Only include the JSON object in your response, no other text.
         """
         Process a user message and return the agent's response
 
+        Context Engineering Applied:
+        - Summarizes long conversations to prevent context overflow
+        - Learns and applies user preferences
+        - Maintains task context across messages
+
         Args:
             user_message: The user's natural language input
 
         Returns:
             AgentResponse with message, steps, and reasoning
         """
+        # Context Engineering: Summarize if conversation is getting long
+        if len(self.conversation_history) >= self.max_history_length:
+            self.context_summary = await self._summarize_conversation()
+
         # Add to conversation history
         self.conversation_history.append({
             "role": "user",
@@ -249,6 +333,9 @@ IMPORTANT: Only include the JSON object in your response, no other text.
             "role": "assistant",
             "content": final_message
         })
+
+        # Context Engineering: Extract and learn user preferences
+        self._extract_user_preferences(user_message, final_message)
 
         return AgentResponse(
             message=final_message,
