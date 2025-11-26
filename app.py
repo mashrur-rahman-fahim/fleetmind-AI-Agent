@@ -327,7 +327,8 @@ def create_app() -> gr.Blocks:
             with gr.Column(scale=2):
                 chatbot = gr.Chatbot(
                     label="Chat with FleetMind Agent",
-                    height=500
+                    height=500,
+                    type="messages"
                 )
 
                 with gr.Row():
