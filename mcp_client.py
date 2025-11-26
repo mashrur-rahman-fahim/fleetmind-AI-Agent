@@ -2,6 +2,8 @@
 FleetMind MCP Client
 Connects to the FleetMind MCP Server via SSE transport using official MCP SDK
 Track 2: MCP in Action - Enterprise Category
+
+Fixed for Gradio threading compatibility - uses fresh connections per request
 """
 
 import json
@@ -36,20 +38,20 @@ class FleetMindMCPClient:
     """
     MCP Client for FleetMind Server
     Uses official MCP SDK for fast, reliable SSE connections
+
+    Thread-safe implementation that creates fresh connections for each operation
+    to avoid anyio task group issues with Gradio's threading model.
     """
 
     def __init__(self, server_url: str, api_key: str):
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
         self.tools: dict[str, MCPTool] = {}
-        self._session: Optional[ClientSession] = None
-        self._read_stream = None
-        self._write_stream = None
         self._connected = False
 
     @property
     def is_connected(self) -> bool:
-        return self._connected and self._session is not None
+        return self._connected
 
     async def _wake_up_space(self) -> bool:
         """Wake up HF space before connecting (free tier spaces sleep when inactive)"""
@@ -68,6 +70,16 @@ class FleetMindMCPClient:
         except Exception:
             return False
 
+    @asynccontextmanager
+    async def _get_session(self):
+        """Create a fresh MCP session for each operation (thread-safe)"""
+        sse_url = f"{self.server_url}/sse?api_key={self.api_key}"
+
+        async with sse_client(sse_url, timeout=60.0, sse_read_timeout=300.0) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                yield session
+
     async def connect(self) -> dict:
         """
         Initialize connection to MCP server and discover tools
@@ -77,29 +89,16 @@ class FleetMindMCPClient:
             # First wake up HF space (free tier spaces sleep when inactive)
             await self._wake_up_space()
 
-            # Build SSE URL with API key
-            sse_url = f"{self.server_url}/sse?api_key={self.api_key}"
-
-            # Connect using official MCP SDK SSE client
-            # Use longer timeout for sleeping HF spaces (default is only 5 seconds)
-            self._sse_context = sse_client(sse_url, timeout=60.0, sse_read_timeout=300.0)
-            self._read_stream, self._write_stream = await self._sse_context.__aenter__()
-
-            # Create session
-            self._session_context = ClientSession(self._read_stream, self._write_stream)
-            self._session = await self._session_context.__aenter__()
-
-            # Initialize the session
-            await self._session.initialize()
-
-            # Discover tools
-            tools_result = await self._session.list_tools()
-            for tool in tools_result.tools:
-                self.tools[tool.name] = MCPTool(
-                    name=tool.name,
-                    description=tool.description or "",
-                    parameters=tool.inputSchema if hasattr(tool, 'inputSchema') else {}
-                )
+            # Create a temporary session just to discover tools
+            async with self._get_session() as session:
+                # Discover tools
+                tools_result = await session.list_tools()
+                for tool in tools_result.tools:
+                    self.tools[tool.name] = MCPTool(
+                        name=tool.name,
+                        description=tool.description or "",
+                        parameters=tool.inputSchema if hasattr(tool, 'inputSchema') else {}
+                    )
 
             self._connected = True
 
@@ -117,6 +116,8 @@ class FleetMindMCPClient:
         """
         Execute an MCP tool
 
+        Creates a fresh connection for each tool call to avoid threading issues.
+
         Args:
             tool_name: Name of the tool to call
             arguments: Tool arguments as a dictionary
@@ -124,10 +125,10 @@ class FleetMindMCPClient:
         Returns:
             MCPResponse with success status and result/error
         """
-        if not self.is_connected:
+        if not self._connected:
             return MCPResponse(
                 success=False,
-                error="Not connected to MCP server",
+                error="Not connected to MCP server. Call connect() first.",
                 tool_name=tool_name
             )
 
@@ -139,31 +140,33 @@ class FleetMindMCPClient:
             )
 
         try:
-            result = await self._session.call_tool(tool_name, arguments or {})
+            # Create a fresh session for this tool call (thread-safe)
+            async with self._get_session() as session:
+                result = await session.call_tool(tool_name, arguments or {})
 
-            # Extract content from MCP response
-            if result.content:
-                for content_item in result.content:
-                    if hasattr(content_item, 'text'):
-                        try:
-                            parsed = json.loads(content_item.text)
-                            return MCPResponse(
-                                success=True,
-                                result=parsed,
-                                tool_name=tool_name
-                            )
-                        except json.JSONDecodeError:
-                            return MCPResponse(
-                                success=True,
-                                result=content_item.text,
-                                tool_name=tool_name
-                            )
+                # Extract content from MCP response
+                if result.content:
+                    for content_item in result.content:
+                        if hasattr(content_item, 'text'):
+                            try:
+                                parsed = json.loads(content_item.text)
+                                return MCPResponse(
+                                    success=True,
+                                    result=parsed,
+                                    tool_name=tool_name
+                                )
+                            except json.JSONDecodeError:
+                                return MCPResponse(
+                                    success=True,
+                                    result=content_item.text,
+                                    tool_name=tool_name
+                                )
 
-            return MCPResponse(
-                success=True,
-                result=str(result),
-                tool_name=tool_name
-            )
+                return MCPResponse(
+                    success=True,
+                    result=str(result),
+                    tool_name=tool_name
+                )
 
         except Exception as e:
             return MCPResponse(
@@ -188,19 +191,9 @@ class FleetMindMCPClient:
         ]
 
     async def disconnect(self):
-        """Close the connection"""
-        try:
-            if self._session:
-                await self._session_context.__aexit__(None, None, None)
-            if self._read_stream:
-                await self._sse_context.__aexit__(None, None, None)
-        except Exception:
-            pass
-        finally:
-            self._connected = False
-            self._session = None
-            self._read_stream = None
-            self._write_stream = None
+        """Mark as disconnected (no persistent connection to close)"""
+        self._connected = False
+        self.tools = {}
 
 
 # Direct tool execution without persistent connection
