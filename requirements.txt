@@ -11,7 +11,7 @@ mcp>=1.0.0
 httpx>=0.27.0
 httpx-sse>=0.4.0
 
-# Google Gemini AI for agent reasoning
+# Google Gemini for agent reasoning
 google-generativeai>=0.8.0
 
 # Environment variables

@@ -108,15 +108,22 @@ Provide a concise summary in 3-4 sentences."""
         Context Engineering: Learn user preferences over time
         Examples: preferred priority levels, common addresses, driver preferences
         """
+        # Safety check - ensure we have strings
+        if not isinstance(user_message, str):
+            return
+        if not isinstance(agent_response, str):
+            agent_response = str(agent_response) if agent_response else ""
+
         # Simple pattern matching for common preferences
-        if "urgent" in user_message.lower() or "asap" in user_message.lower():
+        user_lower = user_message.lower()
+        if "urgent" in user_lower or "asap" in user_lower:
             self.user_preferences["prefers_urgent"] = True
 
-        if "fragile" in user_message.lower():
+        if "fragile" in user_lower:
             self.user_preferences["handles_fragile"] = True
 
         # Extract common addresses (simple heuristic)
-        if "deliver to" in user_message.lower() or "address" in user_message.lower():
+        if "deliver to" in user_lower or "address" in user_lower:
             # Could extract and store frequently used addresses
             pass
 
@@ -352,79 +359,187 @@ IMPORTANT: Only include the JSON object in your response, no other text.
         reasoning: str
     ) -> str:
         """Generate a final user-friendly response after tool execution"""
-        # Build execution summary
+        # Build execution summary - extract key data from results
         execution_summary = []
+        all_items = []  # Collect list items for display
+
         for step in steps:
-            result_str = json.dumps(step.result, indent=2) if step.result else "No result"
-            execution_summary.append(f"""
-Step {step.step_number}: {step.action}
-Tool: {step.tool_name or 'None'}
-Arguments: {json.dumps(step.tool_args, indent=2) if step.tool_args else 'None'}
-Result: {result_str[:1000]}
-""")
+            result = step.result
+            result_str = ""
+
+            if result:
+                # Handle list results (orders, drivers, etc.)
+                if isinstance(result, dict):
+                    # Check for list-type responses
+                    if 'orders' in result and isinstance(result['orders'], list):
+                        all_items = result['orders']
+                        result_str = f"Found {len(all_items)} orders"
+                    elif 'drivers' in result and isinstance(result['drivers'], list):
+                        all_items = result['drivers']
+                        result_str = f"Found {len(all_items)} drivers"
+                    elif 'assignments' in result and isinstance(result['assignments'], list):
+                        all_items = result['assignments']
+                        result_str = f"Found {len(all_items)} assignments"
+                    else:
+                        result_str = json.dumps(result, indent=2)[:2000]
+                elif isinstance(result, list):
+                    all_items = result
+                    result_str = f"Found {len(result)} items"
+                else:
+                    result_str = str(result)[:2000]
+
+            execution_summary.append(f"Step {step.step_number}: {step.action}\nTool: {step.tool_name}\nResult: {result_str}")
 
         summary_text = "\n".join(execution_summary)
 
-        prompt = f"""Based on the tool execution results below, provide a clear, helpful response to the user.
+        # Build items table if we have list data
+        items_table = ""
+        if all_items:
+            # Detect type and build appropriate table
+            if all_items and isinstance(all_items[0], dict):
+                if 'order_id' in all_items[0]:
+                    items_table = "\n\nORDERS DATA:\n| Order ID | Customer | Address | Status | Priority | Driver |\n|----------|----------|---------|--------|----------|--------|\n"
+                    for item in all_items:
+                        # Handle NESTED structure (fetch_orders, get_incomplete_orders)
+                        customer = item.get('customer', {})
+                        if isinstance(customer, dict):
+                            customer_name = customer.get('name', '')
+                        else:
+                            # Handle FLAT structure (search_orders)
+                            customer_name = item.get('customer_name', 'N/A')
 
-User Request: {user_message}
+                        delivery = item.get('delivery', {})
+                        if isinstance(delivery, dict):
+                            address = delivery.get('address', '')
+                        else:
+                            address = item.get('delivery_address', 'N/A')
 
-Initial Reasoning: {reasoning}
+                        details = item.get('details', {})
+                        if isinstance(details, dict):
+                            status = details.get('status', '')
+                            priority = details.get('priority', 'standard')
+                        else:
+                            status = item.get('status', 'N/A')
+                            priority = item.get('priority', 'standard')
+
+                        # Get assigned driver
+                        assigned_driver = item.get('assigned_driver_id')
+                        if assigned_driver:
+                            driver_str = str(assigned_driver)[-8:]  # Last 8 chars
+                        else:
+                            driver_str = 'none'
+
+                        # Truncate for table display
+                        order_id = str(item.get('order_id', 'N/A'))[:22]
+                        customer_name = str(customer_name)[:15] if customer_name else 'N/A'
+                        address = str(address)[:25] if address else 'N/A'
+
+                        items_table += f"| {order_id} | {customer_name} | {address}... | {status or 'N/A'} | {priority} | {driver_str} |\n"
+
+                elif 'driver_id' in all_items[0]:
+                    items_table = "\n\nDRIVERS DATA:\n| Driver ID | Name | Phone | Status | Vehicle | Location | Skills |\n|-----------|------|-------|--------|---------|----------|--------|\n"
+                    for item in all_items:
+                        driver_id = str(item.get('driver_id', 'N/A'))[:15]
+                        name = str(item.get('name', 'N/A'))[:25]
+                        status = item.get('status', 'N/A')
+
+                        # Handle NESTED structure (fetch_drivers, get_available_drivers)
+                        vehicle = item.get('vehicle', {})
+                        if isinstance(vehicle, dict):
+                            vehicle_type = vehicle.get('type', 'N/A')
+                        else:
+                            # Handle FLAT structure (search_drivers)
+                            vehicle_type = item.get('vehicle_type', 'N/A')
+
+                        contact = item.get('contact', {})
+                        if isinstance(contact, dict):
+                            phone = contact.get('phone') or item.get('phone')
+                        else:
+                            phone = item.get('phone')
+                        phone = phone if phone else 'N/A'
+
+                        # Handle location - prefer address, fallback to lat/lng
+                        location = item.get('location', {})
+                        if isinstance(location, dict):
+                            loc_address = location.get('address')
+                            if loc_address:
+                                loc_str = str(loc_address)[:20]
+                            elif location.get('latitude') and location.get('longitude'):
+                                loc_str = f"{location.get('latitude', 0):.4f},{location.get('longitude', 0):.4f}"
+                            else:
+                                loc_str = 'N/A'
+                        else:
+                            loc_str = 'N/A'
+
+                        # Handle skills array
+                        skills = item.get('skills', [])
+                        if skills and isinstance(skills, list):
+                            skills_str = ','.join(str(s) for s in skills[:2])  # Show first 2
+                            if len(skills) > 2:
+                                skills_str += '...'
+                        else:
+                            skills_str = 'none'
+
+                        items_table += f"| {driver_id} | {name} | {phone} | {status} | {vehicle_type} | {loc_str} | {skills_str} |\n"
+
+                elif 'assignment_id' in all_items[0]:
+                    items_table = "\n\nASSIGNMENTS DATA:\n| Assignment ID | Order ID | Driver ID | Status | ETA | Distance |\n|---------------|----------|-----------|--------|-----|----------|\n"
+                    for item in all_items:
+                        assignment_id = str(item.get('assignment_id', 'N/A'))[:15]
+                        order_id = str(item.get('order_id', 'N/A'))[:15]
+                        driver_id = str(item.get('driver_id', 'N/A'))[:15]
+                        status = item.get('status', 'N/A')
+
+                        # Handle ETA
+                        eta = item.get('estimated_arrival', 'N/A')
+                        if eta and eta != 'N/A' and len(str(eta)) > 10:
+                            eta = str(eta)[11:16]  # Extract HH:MM from ISO datetime
+
+                        # Handle distance - try route.distance_meters or flat
+                        route = item.get('route', {})
+                        if isinstance(route, dict):
+                            distance = route.get('distance_meters')
+                        else:
+                            distance = item.get('route_distance_meters')
+                        if distance:
+                            distance = f"{int(distance)/1000:.1f}km"
+                        else:
+                            distance = 'N/A'
+
+                        items_table += f"| {assignment_id} | {order_id} | {driver_id} | {status} | {eta} | {distance} |\n"
+
+        # Generate concise response with Gemini
+        response_prompt = f"""Based on the following tool execution results, provide a CONCISE response to the user.
+
+User's original request: {user_message}
 
 Execution Results:
 {summary_text}
 
-Provide a concise, user-friendly summary of what was accomplished. Include:
-1. What actions were taken
-2. Key results (order IDs, driver names, etc.)
-3. Any relevant next steps or suggestions
+Guidelines:
+- Be brief and direct (2-3 sentences max for simple queries)
+- State the key result/answer first
+- Only mention relevant details
+- Don't repeat the user's question
+- Don't explain what tools were used unless there was an error
 
-Keep the response conversational and helpful. Do not include raw JSON - format data nicely.
-"""
+Respond naturally as if talking to the user."""
 
         try:
-            response = self.model.generate_content(prompt)
-            return response.text
+            response = self.model.generate_content(response_prompt)
+            final_text = response.text.strip()
+
+            # Add the data table if we have items
+            if items_table:
+                final_text += items_table
+
+            return final_text
         except Exception:
-            # Fallback to basic summary
-            return f"Completed {len(steps)} operations. Check the execution steps for details."
+            # Fallback to simple summary
+            return f"Completed {len(steps)} operation(s)." + items_table
 
     def clear_history(self):
         """Clear conversation history"""
         self.conversation_history = []
-
-
-# Utility functions for common operations
-def format_order_summary(order: dict) -> str:
-    """Format an order for display"""
-    return f"""
-**Order {order.get('order_id', 'N/A')}**
-- Customer: {order.get('customer_name', 'N/A')}
-- Address: {order.get('delivery_address', 'N/A')}
-- Status: {order.get('status', 'N/A')}
-- Priority: {order.get('priority', 'standard')}
-- Created: {order.get('created_at', 'N/A')}
-"""
-
-
-def format_driver_summary(driver: dict) -> str:
-    """Format a driver for display"""
-    return f"""
-**Driver {driver.get('driver_id', 'N/A')}**
-- Name: {driver.get('name', 'N/A')}
-- Status: {driver.get('status', 'N/A')}
-- Vehicle: {driver.get('vehicle_type', 'N/A')} ({driver.get('vehicle_plate', 'N/A')})
-- Capacity: {driver.get('capacity_kg', 0)}kg / {driver.get('capacity_m3', 0)}m³
-"""
-
-
-def format_assignment_summary(assignment: dict) -> str:
-    """Format an assignment for display"""
-    return f"""
-**Assignment {assignment.get('assignment_id', 'N/A')}**
-- Order: {assignment.get('order_id', 'N/A')}
-- Driver: {assignment.get('driver_id', 'N/A')}
-- Status: {assignment.get('status', 'N/A')}
-- Distance: {assignment.get('route_distance_meters', 0) / 1000:.1f} km
-- ETA: {assignment.get('estimated_arrival', 'N/A')}
-"""
+        self.context_summary = ""
+        self.task_context = {}
