@@ -4,7 +4,7 @@ emoji: 🚛
 colorFrom: blue
 colorTo: purple
 sdk: gradio
-sdk_version: 4.44.1
+sdk_version: "4.44.1"
 app_file: app.py
 pinned: true
 short_description: Autonomous AI agent for fleet management using MCP tools
