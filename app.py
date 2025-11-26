@@ -236,17 +236,46 @@ def clear_chat() -> tuple[list, str, str]:
     return [], "*Start a conversation to see AI reasoning here...*", "*Tools used will appear here...*"
 
 
-# Example prompts - more diverse and useful
-EXAMPLE_PROMPTS = [
-    ("📋 List drivers", "Show me all available drivers"),
-    ("➕ Create driver", "Create a new driver named Alex with a motorcycle, phone 555-0123"),
-    ("📦 List orders", "Show me all pending orders"),
-    ("🚀 Create order", "Create an urgent delivery for Sarah at 456 Oak Street, due in 2 hours"),
-    ("🤖 AI assign", "Use intelligent assignment to find the best driver for my latest order"),
-    ("📊 Fleet status", "What's the current status of my entire fleet?"),
-    ("🗺️ Geocode", "Geocode: 1600 Amphitheatre Parkway, Mountain View, CA"),
-    ("🔍 Search", "Find all orders for customer John"),
-]
+# Tool prompts organized by category (all 29 MCP tools)
+TOOL_PROMPTS = {
+    "🗺️ Routing": [
+        ("📍 Geocode", "Geocode: 1600 Amphitheatre Parkway, Mountain View, CA"),
+        ("🛣️ Get Route", "Calculate the route from 123 Main St to 456 Oak Ave"),
+        ("⏱️ Bulk ETAs", "Calculate ETAs for all my active deliveries"),
+    ],
+    "📦 Orders": [
+        ("📋 List Orders", "Show me all orders"),
+        ("🔍 Pending", "Show me all pending orders"),
+        ("➕ Create Order", "Create an urgent delivery for Sarah at 456 Oak St, due in 2 hours"),
+        ("🔎 Get Order", "Get details of order ORD-001"),
+        ("✏️ Update Order", "Update order ORD-001 priority to high"),
+        ("❌ Cancel Order", "Cancel order ORD-001"),
+        ("🔍 Search Orders", "Search for orders for customer John"),
+        ("📊 Order Stats", "Show order statistics"),
+        ("🤖 AI Assignment", "Use intelligent assignment to find the best driver for my latest order"),
+    ],
+    "🚗 Drivers": [
+        ("👥 List Drivers", "Show me all drivers"),
+        ("✅ Available", "Show me all available drivers"),
+        ("➕ Create Driver", "Create a new driver named Alex with a motorcycle, phone 555-0123"),
+        ("🔎 Get Driver", "Get details of driver DRV-001"),
+        ("✏️ Update Driver", "Update driver DRV-001 phone to 555-9999"),
+        ("🗑️ Delete Driver", "Delete driver DRV-001"),
+        ("📍 Update Location", "Update driver DRV-001 location to 37.7749, -122.4194"),
+        ("🔄 Update Status", "Set driver DRV-001 status to break"),
+        ("📈 Driver Performance", "Show performance metrics for driver DRV-001"),
+    ],
+    "📋 Assignments": [
+        ("📋 List Assignments", "Show me all assignments"),
+        ("🔎 Get Assignment", "Get details of assignment ASN-001"),
+        ("➕ Assign Order", "Assign order ORD-001 to driver DRV-001"),
+        ("🚀 Start Delivery", "Start delivery for assignment ASN-001"),
+        ("✅ Complete Delivery", "Complete delivery for assignment ASN-001"),
+        ("❌ Fail Delivery", "Mark assignment ASN-001 as failed - customer not available"),
+        ("🔄 Reassign", "Reassign order ORD-001 to driver DRV-002"),
+        ("📊 Fleet Status", "What's the current status of my entire fleet?"),
+    ],
+}
 
 
 # Build the Gradio interface
@@ -842,6 +871,67 @@ def create_app() -> gr.Blocks:
     .thinking-block[open] .thinking-header::before {
         transform: rotate(90deg);
     }
+
+    /* Tool Accordion Styling */
+    .tool-accordion {
+        margin-bottom: 6px !important;
+    }
+
+    .tool-accordion > .label-wrap {
+        padding: 8px 12px !important;
+        background: var(--bg-secondary) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 10px !important;
+    }
+
+    .tool-accordion > .label-wrap:hover {
+        background: var(--bg-hover) !important;
+        border-color: var(--accent) !important;
+    }
+
+    .tool-accordion > .label-wrap > span {
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        color: var(--text-primary) !important;
+    }
+
+    .tool-accordion > div:last-child {
+        padding: 8px !important;
+        background: rgba(0, 0, 0, 0.1) !important;
+        border: 1px solid var(--border) !important;
+        border-top: none !important;
+        border-radius: 0 0 10px 10px !important;
+        margin-top: -1px !important;
+    }
+
+    /* Tool Button Styling */
+    .tool-btn {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border) !important;
+        color: var(--text-secondary) !important;
+        border-radius: 8px !important;
+        padding: 6px 10px !important;
+        font-size: 11px !important;
+        min-width: auto !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .tool-btn:hover {
+        background: var(--bg-hover) !important;
+        border-color: var(--accent) !important;
+        color: var(--text-primary) !important;
+        transform: translateY(-1px) !important;
+    }
+
+    /* Compact row spacing inside accordions */
+    .tool-accordion .gradio-row {
+        gap: 6px !important;
+        margin-bottom: 4px !important;
+    }
+
+    .tool-accordion .gradio-row:last-child {
+        margin-bottom: 0 !important;
+    }
     """
 
     with gr.Blocks() as app:
@@ -993,29 +1083,27 @@ def create_app() -> gr.Blocks:
                         elem_id="send-btn",
                     )
 
-                # Quick actions
+                # Quick actions - All 29 MCP Tools organized by category
                 gr.HTML("""<div style="margin: 8px 0 6px 0; color: #64748b; font-size: 12px; font-weight: 500;">
-                    Quick Actions
+                    🛠️ Quick Actions (29 MCP Tools)
                 </div>""")
 
-                with gr.Row():
-                    example_btns = []
-                    for icon_label, prompt in EXAMPLE_PROMPTS[:4]:
-                        btn = gr.Button(
-                            icon_label,
-                            size="sm",
-                            variant="secondary",
-                        )
-                        example_btns.append((btn, prompt))
+                example_btns = []
 
-                with gr.Row():
-                    for icon_label, prompt in EXAMPLE_PROMPTS[4:]:
-                        btn = gr.Button(
-                            icon_label,
-                            size="sm",
-                            variant="secondary",
-                        )
-                        example_btns.append((btn, prompt))
+                # Create accordion for each category
+                for category, tools in TOOL_PROMPTS.items():
+                    with gr.Accordion(category, open=False, elem_classes=["tool-accordion"]):
+                        # Create buttons in rows of 3
+                        for i in range(0, len(tools), 3):
+                            with gr.Row():
+                                for icon_label, prompt in tools[i:i+3]:
+                                    btn = gr.Button(
+                                        icon_label,
+                                        size="sm",
+                                        variant="secondary",
+                                        elem_classes=["tool-btn"],
+                                    )
+                                    example_btns.append((btn, prompt))
 
             # Right column - Settings & Info
             with gr.Column(scale=3):
@@ -1140,19 +1228,19 @@ def create_app() -> gr.Blocks:
             outputs=[connection_status, tools_info, connection_state, chatbot, reasoning_display, tools_display]
         )
 
-        # Step 1: Show user message immediately and clear input
+        # Step 1: Show user message immediately, clear input, disable send button
         def user_message_submitted(message, history):
             if not message.strip():
-                return history, "", gr.update(interactive=True)
+                return history, "", gr.update(interactive=True), gr.update(interactive=True)
             # Add user message to history immediately
             history = history + [{"role": "user", "content": message}]
-            # Return updated history, clear input, disable input while processing
-            return history, "", gr.update(interactive=False)
+            # Return updated history, clear input, disable input and send button while processing
+            return history, "", gr.update(interactive=False), gr.update(interactive=False)
 
         # Step 2: Generate AI response (runs after user message is shown)
         def generate_response(history):
             if not history or history[-1]["role"] != "user":
-                return history, "", "", gr.update(interactive=True)
+                return history, "", "", gr.update(interactive=True), gr.update(interactive=True)
 
             # Get the last user message
             user_message = history[-1]["content"]
@@ -1162,28 +1250,28 @@ def create_app() -> gr.Blocks:
             # Process and get response
             result = sync_process_chat(user_message, history_without_last)
 
-            # Return: updated history, reasoning, tools, re-enable input
-            return result[0], result[1], result[2], gr.update(interactive=True)
+            # Return: updated history, reasoning, tools, re-enable input and send button
+            return result[0], result[1], result[2], gr.update(interactive=True), gr.update(interactive=True)
 
         # Chain the events: first show user message, then generate response
         send_btn.click(
             fn=user_message_submitted,
             inputs=[msg_input, chatbot],
-            outputs=[chatbot, msg_input, msg_input]
+            outputs=[chatbot, msg_input, msg_input, send_btn]
         ).then(
             fn=generate_response,
             inputs=[chatbot],
-            outputs=[chatbot, reasoning_display, tools_display, msg_input]
+            outputs=[chatbot, reasoning_display, tools_display, msg_input, send_btn]
         )
 
         msg_input.submit(
             fn=user_message_submitted,
             inputs=[msg_input, chatbot],
-            outputs=[chatbot, msg_input, msg_input]
+            outputs=[chatbot, msg_input, msg_input, send_btn]
         ).then(
             fn=generate_response,
             inputs=[chatbot],
-            outputs=[chatbot, reasoning_display, tools_display, msg_input]
+            outputs=[chatbot, reasoning_display, tools_display, msg_input, send_btn]
         )
 
         clear_btn.click(
