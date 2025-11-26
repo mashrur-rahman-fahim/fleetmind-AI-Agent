@@ -1,9 +1,11 @@
 # FleetMind AI Agent - Track 2 Dependencies
 # MCP in Action - Enterprise Category
 
-# Gradio for UI (pinned versions for HuggingFace compatibility)
-gradio==5.6.0
-gradio_client==1.4.3
+# Gradio for UI (latest version with HfFolder fix)
+gradio>=5.8.0
+
+# Pin huggingface_hub to avoid HfFolder removal issue
+huggingface_hub>=0.26.0,<1.0
 
 # Official Model Context Protocol SDK (REQUIRED)
 mcp>=1.0.0
