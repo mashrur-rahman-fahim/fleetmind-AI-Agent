@@ -55,19 +55,39 @@ class FleetMindMCPClient:
 
     async def _wake_up_space(self) -> bool:
         """Wake up HF space before connecting (free tier spaces sleep when inactive)"""
+        print("Waking up HuggingFace space...")
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                for attempt in range(3):
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                # Try up to 5 times with increasing delays
+                for attempt in range(5):
                     try:
+                        print(f"  Wake-up attempt {attempt + 1}/5...")
+                        # First hit the root endpoint
                         response = await client.get(f"{self.server_url}/")
                         if response.status_code == 200:
+                            print(f"  Root endpoint responded OK")
+                            # Also try the health/status endpoint if available
+                            try:
+                                health = await client.get(f"{self.server_url}/health", timeout=30.0)
+                                print(f"  Health check: {health.status_code}")
+                            except:
+                                pass
+                            # Wait a bit for full initialization
+                            await asyncio.sleep(2)
                             return True
                     except httpx.TimeoutException:
-                        if attempt < 2:
-                            await asyncio.sleep(2)
+                        print(f"  Attempt {attempt + 1} timed out, waiting...")
+                        # Increasing delay between retries
+                        await asyncio.sleep(3 + attempt * 2)
                         continue
+                    except Exception as e:
+                        print(f"  Attempt {attempt + 1} error: {e}")
+                        await asyncio.sleep(3 + attempt * 2)
+                        continue
+            print("  Wake-up failed after all attempts")
             return False
-        except Exception:
+        except Exception as e:
+            print(f"  Wake-up exception: {e}")
             return False
 
     @asynccontextmanager
@@ -75,7 +95,8 @@ class FleetMindMCPClient:
         """Create a fresh MCP session for each operation (thread-safe)"""
         sse_url = f"{self.server_url}/sse?api_key={self.api_key}"
 
-        async with sse_client(sse_url, timeout=60.0, sse_read_timeout=300.0) as (read_stream, write_stream):
+        # Increased timeouts for cold-start scenarios
+        async with sse_client(sse_url, timeout=120.0, sse_read_timeout=300.0) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 yield session
@@ -84,30 +105,52 @@ class FleetMindMCPClient:
         """
         Initialize connection to MCP server and discover tools
         Uses official MCP SDK SSE client for fast connection
+
+        Includes retry logic for cold-start scenarios on HuggingFace
         """
         try:
             # First wake up HF space (free tier spaces sleep when inactive)
-            await self._wake_up_space()
+            wake_up_success = await self._wake_up_space()
+            if not wake_up_success:
+                print("Warning: Space wake-up may have failed, trying to connect anyway...")
 
-            # Create a temporary session just to discover tools
-            async with self._get_session() as session:
-                # Discover tools
-                tools_result = await session.list_tools()
-                for tool in tools_result.tools:
-                    self.tools[tool.name] = MCPTool(
-                        name=tool.name,
-                        description=tool.description or "",
-                        parameters=tool.inputSchema if hasattr(tool, 'inputSchema') else {}
-                    )
+            # Retry connection up to 3 times
+            last_error = None
+            for attempt in range(3):
+                try:
+                    print(f"Connecting to MCP server (attempt {attempt + 1}/3)...")
 
-            self._connected = True
+                    # Create a temporary session just to discover tools
+                    async with self._get_session() as session:
+                        # Discover tools
+                        tools_result = await session.list_tools()
+                        for tool in tools_result.tools:
+                            self.tools[tool.name] = MCPTool(
+                                name=tool.name,
+                                description=tool.description or "",
+                                parameters=tool.inputSchema if hasattr(tool, 'inputSchema') else {}
+                            )
 
-            return {
-                "success": True,
-                "session_id": "mcp-sdk-session",
-                "tools_count": len(self.tools),
-                "tools": list(self.tools.keys())
-            }
+                    self._connected = True
+                    print(f"Connected successfully! Found {len(self.tools)} tools.")
+
+                    return {
+                        "success": True,
+                        "session_id": "mcp-sdk-session",
+                        "tools_count": len(self.tools),
+                        "tools": list(self.tools.keys())
+                    }
+
+                except Exception as e:
+                    last_error = str(e)
+                    print(f"Connection attempt {attempt + 1} failed: {e}")
+                    if attempt < 2:
+                        # Wait before retry with increasing delay
+                        wait_time = 3 + attempt * 2
+                        print(f"Retrying in {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+
+            return {"success": False, "error": f"Failed after 3 attempts: {last_error}"}
 
         except Exception as e:
             return {"success": False, "error": str(e)}
