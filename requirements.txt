@@ -2,7 +2,7 @@
 # MCP in Action - Enterprise Category
 
 # Gradio for UI (latest stable version)
-gradio==5.9.1
+gradio==6.0.1
 
 # Official Model Context Protocol SDK (REQUIRED)
 mcp>=1.0.0

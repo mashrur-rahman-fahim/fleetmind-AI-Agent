@@ -4,7 +4,7 @@ emoji: 🚛
 colorFrom: blue
 colorTo: purple
 sdk: gradio
-sdk_version: "5.9.1"
+sdk_version: "6.0.1"
 app_file: app.py
 pinned: true
 short_description: Autonomous AI agent for fleet management using MCP tools
@@ -28,7 +28,7 @@ tags:
 
 An autonomous AI agent for enterprise fleet management that demonstrates the full power of the Model Context Protocol (MCP). This application showcases **planning, reasoning, and execution** capabilities through natural language interaction with a complete fleet management system.
 
-[![Gradio](https://img.shields.io/badge/Gradio-5.9.1-orange)](https://gradio.app)
+[![Gradio](https://img.shields.io/badge/Gradio-6.0.1-orange)](https://gradio.app)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-brightgreen)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-1.0-blue)](https://modelcontextprotocol.io)
 [![Gemini](https://img.shields.io/badge/Gemini-2.0_Flash-red)](https://ai.google.dev)
