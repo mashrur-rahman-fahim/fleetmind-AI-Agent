@@ -1070,10 +1070,11 @@ def create_app() -> gr.Blocks:
                 # Input area
                 with gr.Row():
                     msg_input = gr.Textbox(
-                        placeholder="Ask me to manage your fleet... (e.g., 'Create an urgent delivery to 123 Main St')",
+                        placeholder="Connect to MCP server first to start chatting...",
                         show_label=False,
                         lines=1,
                         scale=6,
+                        interactive=False,  # Disabled until connected
                     )
                     send_btn = gr.Button(
                         "Send →",
@@ -1081,6 +1082,7 @@ def create_app() -> gr.Blocks:
                         scale=1,
                         min_width=100,
                         elem_id="send-btn",
+                        interactive=False,  # Disabled until connected
                     )
 
                 # Quick actions - All 29 MCP Tools organized by category
@@ -1117,7 +1119,7 @@ def create_app() -> gr.Blocks:
                     )
                     api_key = gr.Textbox(
                         label="FleetMind API Key",
-                        value=Config.MCP_API_KEY,
+                        value="",  # User must enter API key manually
                         type="password",
                         placeholder="fm_xxxxx...",
                     )
@@ -1212,20 +1214,26 @@ def create_app() -> gr.Blocks:
                 agent.clear_history()
 
             status, tools, state = sync_connect(server_url, api_key)
-            # Return status, tools, state, and clear chat + reasoning displays
+
+            # Check if connection was successful
+            is_connected = state == "connected"
+
+            # Return status, tools, state, clear chat + reasoning displays, and enable/disable inputs
             return (
                 status,
                 tools,
                 state,
                 [],  # Clear chatbot
-                "*Connected! Start a conversation...*",  # Clear reasoning
-                "*Tools used will appear here...*"  # Clear tools display
+                "*Connected! Start a conversation...*" if is_connected else "*Connect to MCP server first...*",  # Reasoning
+                "*Tools used will appear here...*",  # Clear tools display
+                gr.update(interactive=is_connected, placeholder="Ask me to manage your fleet... (e.g., 'Create an urgent delivery to 123 Main St')" if is_connected else "Connect to MCP server first to start chatting..."),  # Enable/disable msg_input
+                gr.update(interactive=is_connected),  # Enable/disable send_btn
             )
 
         connect_btn.click(
             fn=handle_connect,
             inputs=[server_url, api_key],
-            outputs=[connection_status, tools_info, connection_state, chatbot, reasoning_display, tools_display]
+            outputs=[connection_status, tools_info, connection_state, chatbot, reasoning_display, tools_display, msg_input, send_btn]
         )
 
         # Step 1: Show user message immediately, clear input, disable send button
