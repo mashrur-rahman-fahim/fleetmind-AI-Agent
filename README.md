@@ -7,7 +7,7 @@ sdk: gradio
 sdk_version: "6.0.1"
 app_file: app.py
 pinned: true
-short_description: Autonomous AI dispatcher using Gemini 2.0 Flash + 29 MCP tools
+short_description: Autonomous AI fleet dispatcher with 29 MCP tools
 tags:
   - mcp
   - mcp-in-action-track-enterprise
@@ -191,6 +191,7 @@ python app.py
 | Resource | URL |
 |----------|-----|
 | **Live Demo** | [FleetMind AI Agent](https://huggingface.co/spaces/MCP-1st-Birthday/fleetmind-in-action) |
+| **GitHub** | [fleetmind-AI-Agent](https://github.com/mashrur-rahman-fahim/fleetmind-AI-Agent) |
 | **MCP Server** | [FleetMind MCP](https://huggingface.co/spaces/MCP-1st-Birthday/fleetmind-dispatch-ai) |
 | **Get API Key** | [Generate Key](https://mcp-1st-birthday-fleetmind-dispatch-ai.hf.space/generate-key) |
 
