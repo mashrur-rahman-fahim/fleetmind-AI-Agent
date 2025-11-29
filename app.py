@@ -1146,7 +1146,7 @@ def create_app() -> gr.Blocks:
                     )
                     api_key = gr.Textbox(
                         label="FleetMind API Key",
-                        value="",  # User must enter API key manually
+                        value=Config.MCP_API_KEY,  # Use default from config
                         type="password",
                         placeholder="fm_xxxxx...",
                     )
