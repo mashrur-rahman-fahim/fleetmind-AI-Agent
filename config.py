@@ -15,7 +15,7 @@ class Config:
 
     # MCP Server Configuration
     MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "https://fleetmind-mcp.hf.space")
-    MCP_API_KEY: str = os.getenv("MCP_API_KEY", "")
+    MCP_API_KEY: str = os.getenv("MCP_API_KEY", "fm_J-9Fyegamqu9l3WE7i5xHkog9oJRUTXOtljt-SV_c6U")
 
     # Gemini AI Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
