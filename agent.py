@@ -2,6 +2,8 @@
 FleetMind AI Agent
 Autonomous fleet management agent using Gemini 2.0 Flash
 Track 2: MCP in Action - Enterprise Category
+
+FIXED: True iterative agentic loop - Gemini sees tool results and decides next action
 """
 
 import json
@@ -44,6 +46,7 @@ class FleetMindAgent:
     Uses Gemini 2.0 Flash for reasoning and MCP tools for execution
 
     Advanced Features:
+    - TRUE ITERATIVE AGENTIC LOOP: Model sees each tool result before deciding next action
     - Context Engineering: Smart conversation memory with summarization
     - Multi-step Planning: Complex task breakdown and execution
     - Reasoning Transparency: Detailed explanation of decision-making
@@ -60,12 +63,12 @@ class FleetMindAgent:
         self.task_context: dict = {}  # Current task context
         self.max_history_length = 20  # Max messages before summarization
 
-        # Initialize Gemini
+        # Initialize Gemini - CRITICAL: temperature=1.0 for Gemini 2.0 reasoning
         genai.configure(api_key=gemini_api_key)
         self.model = genai.GenerativeModel(
             model_name=Config.GEMINI_MODEL,
             generation_config={
-                "temperature": Config.AGENT_TEMPERATURE,
+                "temperature": 1.0,  # IMPORTANT: Gemini 2.0 reasoning optimized for 1.0
                 "top_p": 0.95,
                 "top_k": 40,
                 "max_output_tokens": 8192,
@@ -149,17 +152,17 @@ Provide a concise summary in 3-4 sentences."""
 
         return "\n\n".join(schema_parts)
 
-    def _create_prompt(self, user_message: str) -> str:
+    def _create_iterative_prompt(self, user_message: str, execution_context: list[dict]) -> str:
         """
-        Create the full prompt for the AI model with Context Engineering
-        Includes conversation summary, user preferences, and task context
+        Create prompt for iterative agentic loop.
+        Includes previous tool results so model can make informed decisions.
         """
         # Get current date/time for context
         now = datetime.now()
         current_time = now.strftime("%Y-%m-%d %H:%M:%S")
         default_delivery_time = (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
 
-        # Build context with Context Engineering enhancements
+        # Build context
         context = f"""
 Current Date/Time: {current_time}
 Default Expected Delivery Time (if not specified): {default_delivery_time}
@@ -168,11 +171,11 @@ Connected to MCP Server: {self.mcp_client.is_connected}
 Available Tools: {len(self.mcp_client.tools)}
 """
 
-        # Add conversation summary if available (Context Engineering)
+        # Add conversation summary if available
         if self.context_summary:
             context += f"\n**Conversation Summary**: {self.context_summary}\n"
 
-        # Add learned user preferences (Context Engineering)
+        # Add learned user preferences
         if self.user_preferences:
             prefs_text = "\n**Learned User Preferences**:\n"
             if self.user_preferences.get("prefers_urgent"):
@@ -181,8 +184,8 @@ Available Tools: {len(self.mcp_client.tools)}
                 prefs_text += "- User frequently handles fragile items\n"
             context += prefs_text
 
-        # Recent conversation context (limited to prevent overflow)
-        recent_history = self.conversation_history[-6:] if self.conversation_history else []
+        # Recent conversation history
+        recent_history = self.conversation_history[-4:] if self.conversation_history else []
         history_text = ""
         if recent_history:
             history_text = "\n\n**Recent Conversation**:\n"
@@ -194,7 +197,66 @@ Available Tools: {len(self.mcp_client.tools)}
         # Tool schema
         tools_schema = self._build_tools_schema()
 
+        # Build execution context string showing what's been done
+        execution_history = ""
+        if execution_context:
+            execution_history = "\n\n## EXECUTION HISTORY (What you've done so far)\n"
+            for step in execution_context:
+                step_num = step.get("step", "?")
+                tool_name = step.get("tool", "N/A")
+                args = step.get("arguments", {})
+                result = step.get("result", "N/A")
+                execution_history += f"""
+### Step {step_num}: Called {tool_name}
+Arguments: {json.dumps(args, indent=2)}
+Result: {json.dumps(result, indent=2) if isinstance(result, dict) else result}
+"""
+
         return f"""{AGENT_SYSTEM_PROMPT}
+
+═══════════════════════════════════════════════════════════════
+⚡ CRITICAL: ITERATIVE AGENTIC REASONING
+═══════════════════════════════════════════════════════════════
+
+You are in an ITERATIVE LOOP. Each turn, you can call ONE tool or finish.
+After each tool call, you will see the result and decide the NEXT step.
+
+**WORKFLOW:**
+1. Analyze what the user wants
+2. Determine the NEXT SINGLE action needed
+3. Either call a tool OR provide final response
+
+**RESPONSE FORMAT (STRICT JSON):**
+
+If you need to call a tool:
+```json
+{{
+    "thinking": "My reasoning about what to do next...",
+    "action": "call_tool",
+    "tool": "tool_name",
+    "arguments": {{}},
+    "status": "in_progress"
+}}
+```
+
+If you're DONE (all steps complete):
+```json
+{{
+    "thinking": "Summarizing what was accomplished...",
+    "action": "respond",
+    "message": "Your final response to the user",
+    "status": "complete"
+}}
+```
+
+**IMPORTANT RULES:**
+1. Call ONE tool at a time - you'll see the result before deciding next step
+2. USE ACTUAL DATA from previous tool results (coordinates, IDs, etc.)
+3. Don't guess values - use what the tools returned
+4. After geocoding, USE the lat/lng from the result in subsequent calls
+5. After creating order, USE the order_id for assignment
+
+═══════════════════════════════════════════════════════════════
 
 ## Context
 {context}
@@ -202,31 +264,16 @@ Available Tools: {len(self.mcp_client.tools)}
 
 ## Available Tools Schema
 {tools_schema}
+{execution_history}
 
-## User Request
+## Current User Request
 {user_message}
 
-## Your Response Format
-Respond with a JSON object containing:
-{{
-    "reasoning": "Your step-by-step thinking process (be detailed and explain WHY you choose certain actions)",
-    "plan": [
-        {{
-            "step": 1,
-            "action": "Description of what you're doing",
-            "tool": "tool_name or null if no tool needed",
-            "arguments": {{}} // tool arguments if applicable
-        }}
-    ],
-    "final_message": "Your response to the user after executing the plan"
-}}
-
-If no tools are needed (e.g., answering a question), set plan to an empty array.
-IMPORTANT: Only include the JSON object in your response, no other text.
+## Your Next Action (JSON only, no other text)
 """
 
-    def _parse_ai_response(self, response_text: str) -> dict:
-        """Parse the AI's JSON response"""
+    def _parse_iterative_response(self, response_text: str) -> dict:
+        """Parse the AI's JSON response for iterative loop"""
         # Try to extract JSON from the response
         try:
             # First try direct parse
@@ -250,21 +297,21 @@ IMPORTANT: Only include the JSON object in your response, no other text.
             except json.JSONDecodeError:
                 pass
 
-        # Fallback: return as simple message
+        # Fallback: treat as final response
         return {
-            "reasoning": "Direct response",
-            "plan": [],
-            "final_message": response_text
+            "thinking": "Direct response",
+            "action": "respond",
+            "message": response_text,
+            "status": "complete"
         }
 
     async def process_message(self, user_message: str) -> AgentResponse:
         """
-        Process a user message and return the agent's response
+        Process a user message using TRUE ITERATIVE AGENTIC LOOP.
 
-        Context Engineering Applied:
-        - Summarizes long conversations to prevent context overflow
-        - Learns and applies user preferences
-        - Maintains task context across messages
+        The model calls ONE tool at a time, sees the result, then decides
+        the next action. This allows proper use of tool results (like coordinates
+        from geocoding) in subsequent calls (like create_order).
 
         Args:
             user_message: The user's natural language input
@@ -282,57 +329,99 @@ IMPORTANT: Only include the JSON object in your response, no other text.
             "content": user_message
         })
 
-        # Generate AI response
-        prompt = self._create_prompt(user_message)
-
-        try:
-            response = self.model.generate_content(prompt)
-            ai_response_text = response.text
-        except Exception as e:
-            return AgentResponse(
-                message=f"Error generating AI response: {str(e)}",
-                success=False,
-                error=str(e)
-            )
-
-        # Parse the response
-        parsed = self._parse_ai_response(ai_response_text)
-        reasoning = parsed.get("reasoning", "")
-        plan = parsed.get("plan", [])
-        final_message = parsed.get("final_message", "")
-
-        # Execute the plan
+        # Initialize execution tracking
+        execution_context: list[dict] = []
         steps: list[AgentStep] = []
         tools_called: list[str] = []
+        all_reasoning: list[str] = []
+        final_message = ""
 
-        for i, step_plan in enumerate(plan[:self.max_tool_calls]):
-            step = AgentStep(
-                step_number=i + 1,
-                action=step_plan.get("action", ""),
-                tool_name=step_plan.get("tool"),
-                tool_args=step_plan.get("arguments", {}),
-                reasoning=step_plan.get("reasoning", "")
-            )
+        # ITERATIVE AGENTIC LOOP
+        max_iterations = self.max_tool_calls + 2  # Allow extra iterations for reasoning
+        iteration = 0
 
-            # Execute tool if specified
-            if step.tool_name:
-                tool_result = await self.mcp_client.call_tool(
-                    step.tool_name,
-                    step.tool_args
+        while iteration < max_iterations:
+            iteration += 1
+            print(f"\n🔄 Agent Iteration {iteration}/{max_iterations}")
+
+            # Generate next action
+            prompt = self._create_iterative_prompt(user_message, execution_context)
+
+            try:
+                response = self.model.generate_content(prompt)
+                ai_response_text = response.text
+                print(f"📝 AI Response: {ai_response_text[:500]}...")
+            except Exception as e:
+                return AgentResponse(
+                    message=f"Error generating AI response: {str(e)}",
+                    success=False,
+                    error=str(e)
                 )
-                step.result = tool_result.result if tool_result.success else tool_result.error
-                tools_called.append(step.tool_name)
 
-                # If tool failed, note it
-                if not tool_result.success:
-                    step.action += f" (FAILED: {tool_result.error})"
+            # Parse the response
+            parsed = self._parse_iterative_response(ai_response_text)
+            thinking = parsed.get("thinking", "")
+            action = parsed.get("action", "respond")
+            status = parsed.get("status", "complete")
 
-            steps.append(step)
+            all_reasoning.append(f"Step {iteration}: {thinking}")
 
-        # If we executed tools, regenerate final message with results
+            # Check if agent wants to call a tool
+            if action == "call_tool" and status != "complete":
+                tool_name = parsed.get("tool")
+                tool_args = parsed.get("arguments", {})
+
+                if not tool_name:
+                    print("⚠️ No tool specified, treating as complete")
+                    final_message = parsed.get("message", thinking)
+                    break
+
+                print(f"🔧 Calling tool: {tool_name}")
+                print(f"   Args: {json.dumps(tool_args, indent=2)}")
+
+                # Execute the tool
+                tool_result = await self.mcp_client.call_tool(tool_name, tool_args)
+
+                result_data = tool_result.result if tool_result.success else {"error": tool_result.error}
+                print(f"   Result: {json.dumps(result_data, indent=2) if isinstance(result_data, dict) else result_data}")
+
+                # Record the step
+                step = AgentStep(
+                    step_number=len(steps) + 1,
+                    action=thinking,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    result=result_data,
+                    reasoning=thinking
+                )
+                steps.append(step)
+                tools_called.append(tool_name)
+
+                # Add to execution context for next iteration
+                execution_context.append({
+                    "step": len(execution_context) + 1,
+                    "tool": tool_name,
+                    "arguments": tool_args,
+                    "result": result_data,
+                    "success": tool_result.success
+                })
+
+                # Continue the loop - model will see this result next iteration
+
+            else:
+                # Agent is done - extract final message
+                final_message = parsed.get("message", thinking)
+                print(f"✅ Agent complete: {final_message[:200]}...")
+                break
+
+        # If we hit max iterations without completing
+        if not final_message:
+            final_message = "I completed several operations. Please check the results above."
+
+        # Generate a nicely formatted final response if we have steps
         if steps:
             final_message = await self._generate_final_response(
-                user_message, steps, reasoning
+                user_message, steps, "\n".join(all_reasoning)
             )
 
         # Add assistant response to history
@@ -347,7 +436,7 @@ IMPORTANT: Only include the JSON object in your response, no other text.
         return AgentResponse(
             message=final_message,
             steps=steps,
-            reasoning=reasoning,
+            reasoning="\n".join(all_reasoning),
             tools_called=tools_called,
             success=True
         )
