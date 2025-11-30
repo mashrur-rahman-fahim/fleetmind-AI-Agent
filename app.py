@@ -716,6 +716,19 @@ def create_app() -> gr.Blocks:
         padding: 12px !important;
     }
 
+    /* Server URL input - clean single line with proper height */
+    #server-url-input textarea {
+        min-height: 42px !important;
+        max-height: 42px !important;
+        padding: 10px 14px !important;
+        font-size: 13px !important;
+        line-height: 1.4 !important;
+        resize: none !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        white-space: nowrap !important;
+    }
+
     /* API key help text styling */
     .api-help-text {
         font-size: 11px !important;
@@ -1116,6 +1129,7 @@ def create_app() -> gr.Blocks:
                         value=Config.MCP_SERVER_URL,
                         placeholder="https://your-server.hf.space",
                         lines=1,
+                        elem_id="server-url-input",
                     )
                     api_key = gr.Textbox(
                         label="FleetMind API Key",
