@@ -729,6 +729,19 @@ def create_app() -> gr.Blocks:
         white-space: nowrap !important;
     }
 
+    /* Connection status - clean single line */
+    #connection-status textarea {
+        min-height: 42px !important;
+        max-height: 42px !important;
+        padding: 10px 14px !important;
+        font-size: 13px !important;
+        line-height: 1.4 !important;
+        resize: none !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        white-space: nowrap !important;
+    }
+
     /* API key help text styling */
     .api-help-text {
         font-size: 11px !important;
@@ -1164,6 +1177,7 @@ def create_app() -> gr.Blocks:
                         interactive=False,
                         lines=1,
                         value="Not connected",
+                        elem_id="connection-status",
                     )
                     connection_state = gr.State(value="disconnected")
                     tools_info = gr.Markdown(
