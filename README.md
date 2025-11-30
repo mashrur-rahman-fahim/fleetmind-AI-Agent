@@ -34,10 +34,25 @@ tags:
 
 **The Impact:** Say *"Create urgent delivery for Sarah, find the best driver considering weather"* and watch AI plan, reason, and execute the entire workflow.
 
+[![Demo Video](https://img.shields.io/badge/▶_Watch_Demo-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=chIWtFA20dU)
 [![Try It Live](https://img.shields.io/badge/🚀_Try_It_Live-7C3AED?style=for-the-badge)](https://huggingface.co/spaces/MCP-1st-Birthday/fleetmind-in-action)
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/mashrur-rahman-fahim/fleetmind-AI-Agent)
 [![MCP Server](https://img.shields.io/badge/📡_MCP_Server-blue?style=for-the-badge)](https://huggingface.co/spaces/MCP-1st-Birthday/fleetmind-dispatch-ai)
 
 </div>
+
+---
+
+## 📺 See It In Action
+
+<div align="center">
+  <a href="https://www.youtube.com/watch?v=chIWtFA20dU">
+    <img src="https://img.youtube.com/vi/chIWtFA20dU/maxresdefault.jpg" alt="FleetMind AI Agent Demo" width="560">
+  </a>
+  <p><b>▶️ Click to watch the demo video</b></p>
+</div>
+
+> Watch the autonomous AI agent plan, reason, and execute multi-step delivery dispatch workflows using Gemini 2.0 Flash and 29 MCP tools.
 
 ---
 
