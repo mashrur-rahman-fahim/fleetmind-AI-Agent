@@ -37,6 +37,8 @@ tags:
 [![Demo Video](https://img.shields.io/badge/▶_Watch_Demo-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=chIWtFA20dU)
 [![Try It Live](https://img.shields.io/badge/🚀_Try_It_Live-7C3AED?style=for-the-badge)](https://huggingface.co/spaces/MCP-1st-Birthday/fleetmind-in-action)
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/mashrur-rahman-fahim/fleetmind-AI-Agent)
+[![LinkedIn Post](https://img.shields.io/badge/LinkedIn_Post-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/feed/update/urn:li:ugcPost:7400981114875645952/)
+[![Facebook Post](https://img.shields.io/badge/Facebook_Post-1877F2?style=for-the-badge&logo=facebook&logoColor=white)](https://www.facebook.com/share/v/1DgWKMELGF/)
 [![MCP Server](https://img.shields.io/badge/📡_MCP_Server-blue?style=for-the-badge)](https://huggingface.co/spaces/MCP-1st-Birthday/fleetmind-dispatch-ai)
 
 </div>
